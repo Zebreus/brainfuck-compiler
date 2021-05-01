@@ -46,14 +46,12 @@ class Visitor: public brainfuckVisitor {
     DICompileUnit* compileUnit = nullptr;
     DIType* intType = nullptr;
     DIType* pointerType = nullptr;
-    DIType* voidType = nullptr;
     DIType* getIntType();
     DIType* getPointerType();
-    DIType* getVoidType();
     std::stack<DIScope*> stack;
     Visitor* parent = nullptr;
-    void setLocation(int line, int col, DIScope* scope = nullptr);
-    DISubprogram* createFunction(const std::string&, int line, int column, DISubroutineType* type = nullptr);
+    void setLocation(unsigned int line,unsigned int column, DIScope* scope = nullptr);
+    DISubprogram* createFunction(const std::string& name, unsigned int line, [[maybe_unused]] unsigned int column, DISubroutineType* type = nullptr);
   } debug;
 
   FunctionType* putcharType;
@@ -61,12 +59,7 @@ class Visitor: public brainfuckVisitor {
   Function* putcharFunction;
   Function* getcharFunction;
 
-  Function* mainFunction;
-  Function* currentFunction;
-  Value* stack;
-  //Value* stackOffset;
-
-  void initializeMainFunction(Function* mainFunction);
+  Value* stackPointer;
 
   void generateLeft();
   void generateRight();
