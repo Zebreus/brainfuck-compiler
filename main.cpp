@@ -13,8 +13,14 @@ int main() {
   // antlr4::ANTLRInputStream input(inputString);
   // brainfuckLexer lexer(&input);
 
+  constexpr auto filename = "main.bf";
+
   std::ifstream stream;
-  stream.open("../main.bf");
+  stream.open(filename);
+  if(!stream.is_open()) {
+    std::clog << "Failed to open " << filename << "\n";
+    std::exit(1);
+  }
   antlr4::ANTLRInputStream inputStream(stream);
   brainfuckLexer lexer(&inputStream);
 
