@@ -64,7 +64,7 @@ class Visitor: public brainfuckVisitor {
   Function* mainFunction;
   Function* currentFunction;
   Value* stack;
-  Value* stackOffset;
+  //Value* stackOffset;
 
   void initializeMainFunction(Function* mainFunction);
 

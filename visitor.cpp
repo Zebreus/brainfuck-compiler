@@ -30,7 +30,6 @@ antlrcpp::Any Visitor::visitFile(brainfuckParser::FileContext* context) {
   stack = builder.CreateAlloca(Type::getInt32Ty(llvmContext), 0, stackSize, "stack");
   // TODO Find out what the size value means
   builder.CreateMemSet(stack, ConstantInt::get(llvmContext, APInt(8, 0)), 500 * 4, MaybeAlign(4), false);
-  stackOffset = ConstantInt::get(llvmContext, APInt(32, 0));
 
   DIType* stackType = debug.getPointerType();
   // DILocalVariable* stackVar = debug.builder->createAutoVariable(SP, "stack", SP->getFile(), 1, stackType, true);
@@ -38,13 +37,6 @@ antlrcpp::Any Visitor::visitFile(brainfuckParser::FileContext* context) {
   DIExpression* expression = debug.builder->createExpression();
   DILocation* location = DILocation::get(SP->getContext(), 1, 0, SP);
   debug.builder->insertDeclare(stack, stackVar, expression, location, BB);
-  /*DILocalVariable *stackVariable = debug.builder->createParameterVariable(
-      SP, "stack", ++ArgIdx, debug.compileUnit->getFile(), context->getStart()->getLine(), KSDbgInfo.getDoubleTy(),
-      true);
-  debug.builder->insertDeclare(stack)*/
-
-  // Value* printInt = ConstantInt::get(llvmContext, APInt(32, 42));
-  // builder.CreateCall(putcharType, putcharFunction, {printInt}, "call");
 
   visitChildren(context);
 
@@ -88,14 +80,13 @@ antlrcpp::Any Visitor::visitBlock(brainfuckParser::BlockContext* context) {
   functionName.append(std::to_string(column));
 
   //
-  std::vector<Type*> types{Type::getInt32PtrTy(llvmContext), Type::getInt32Ty(llvmContext)};
-  FunctionType* blockFunctionType = FunctionType::get(Type::getInt32Ty(llvmContext), types, false);
+  std::vector<Type*> types{Type::getInt32PtrTy(llvmContext)};
+  FunctionType* blockFunctionType = FunctionType::get(Type::getInt32PtrTy(llvmContext), types, false);
   Function* function = Function::Create(blockFunctionType, Function::ExternalLinkage, functionName, *module);
-  auto returnStackOffset = builder.CreateCall(blockFunctionType, function, {stack, stackOffset});
+  Value* resultingStack = builder.CreateCall(blockFunctionType, function, {stack});
 
   // Save last state
   auto lastStack = stack;
-  auto lastStackOffset = stackOffset;
   auto lastFunction = currentFunction;
   auto lastInsertPoint = builder.GetInsertBlock();
 
@@ -105,7 +96,7 @@ antlrcpp::Any Visitor::visitBlock(brainfuckParser::BlockContext* context) {
   //  BasicBlock *recurseBlock = BasicBlock::Create(llvmContext, "recurse", function);
 
   function->getArg(0)->setName("stack");
-  function->getArg(1)->setName("stackOffset");
+  //function->getArg(1)->setName("stackOffset");
 
   currentFunction = function;
 
@@ -117,10 +108,8 @@ antlrcpp::Any Visitor::visitBlock(brainfuckParser::BlockContext* context) {
   // Create entry block
   debug.setLocation(line, column);
   builder.SetInsertPoint(entryBlock);
-  stack = function->getArg(0);
-  Value* stackOffsetArgument = function->getArg(1);
-  Value* currentStackAddress1 = builder.CreateGEP(stack, stackOffsetArgument, "currentStackAddress");
-  Value* currentStackValue1 = builder.CreateLoad(currentStackAddress1, "currentStackValue");
+  Value* stackArgument = function->getArg(0);
+  Value* currentStackValue1 = builder.CreateLoad(stackArgument, "stackValue");
   Value* skipBlockConditionVariable = builder.CreateICmpNE(currentStackValue1,
                                                            ConstantInt::get(llvmContext, APInt(32, 0)),
                                                            "skipBlockConditionVariable");
@@ -129,40 +118,38 @@ antlrcpp::Any Visitor::visitBlock(brainfuckParser::BlockContext* context) {
   // Create exit block
   debug.setLocation(context->getStop()->getLine(), context->getStop()->getCharPositionInLine());
   builder.SetInsertPoint(exitBlock);
-  PHINode* exitPhiNode = builder.CreatePHI(Type::getInt32Ty(llvmContext), 2, "exitPhiNode");
-  exitPhiNode->addIncoming(stackOffsetArgument, entryBlock);
+  PHINode* exitPhiNode = builder.CreatePHI(Type::getInt32PtrTy(llvmContext), 2, "exitPhiNode");
+  exitPhiNode->addIncoming(stackArgument, entryBlock);
   builder.CreateRet(exitPhiNode);
 
   // Prepare main block
   debug.setLocation(line, column);
   builder.SetInsertPoint(mainBlock);
-  PHINode* mainPhiNode = builder.CreatePHI(Type::getInt32Ty(llvmContext), 2, "stackOffset");
-  mainPhiNode->addIncoming(stackOffsetArgument, entryBlock);
-  stackOffset = mainPhiNode;
+  PHINode* mainPhiNode = builder.CreatePHI(Type::getInt32PtrTy(llvmContext), 2, "stackOffset");
+  mainPhiNode->addIncoming(stackArgument, entryBlock);
 
   // Insert body
+  stack = mainPhiNode;
   visitStatements(context->statements());
-  mainPhiNode->addIncoming(stackOffset, mainBlock);
+  mainPhiNode->addIncoming(stack, mainBlock);
+  exitPhiNode->addIncoming(stack, mainBlock);
 
   // Insert end decision
   debug.setLocation(context->getStop()->getLine(), context->getStop()->getCharPositionInLine());
-  Value* currentStackAddress = builder.CreateGEP(stack, stackOffset, "currentStackAddress");
-  Value* currentStackValue = builder.CreateLoad(currentStackAddress, "currentStackValue");
+  Value* currentStackValue = builder.CreateLoad(stack, "stackValue");
   Value* conditionVar = builder.CreateICmpNE(currentStackValue, ConstantInt::get(llvmContext, APInt(32, 0)), "blockEndCondition");
   builder.CreateCondBr(conditionVar, mainBlock, exitBlock);
 
-  // Finish end block
-  exitPhiNode->addIncoming(stackOffset, mainBlock);
   // debug.setLocation(line, column);
 
-  stackOffset = returnStackOffset;
+  // stackOffset = returnStackOffset;
 
   debug.builder->finalizeSubprogram(subprogram);
   debug.stack.pop();
 
   // Restore last state
   builder.SetInsertPoint(lastInsertPoint);
-  stack = lastStack;
+  stack = resultingStack;
   currentFunction = lastFunction;
 
   return 0;
@@ -206,27 +193,15 @@ Visitor::Visitor(): llvmContext(), builder(llvmContext) {
   putcharFunction = Function::Create(putcharType, Function::ExternalLinkage, "putchar", *module);
   getcharType = FunctionType::get(Type::getInt32Ty(llvmContext), {}, false);
   getcharFunction = Function::Create(getcharType, Function::ExternalLinkage, "getchar", *module);
-
-  // TheModule->setDataLayout(TheJIT->getTargetMachine().createDataLayout());
-}
-
-void Visitor::initializeMainFunction(Function* mainFunction) {
-  BasicBlock* BB = BasicBlock::Create(llvmContext, "entry", mainFunction);
-  builder.SetInsertPoint(BB);
-  // builder.SetInsertPoint(&(mainFunction->getEntryBlock()));
-  Value* stackSize = ConstantInt::get(llvmContext, APInt(32, 500));
-  stack = builder.CreateAlloca(Type::getInt32Ty(llvmContext), 0, stackSize, "stack");
-  stackOffset = ConstantInt::get(llvmContext, APInt(32, 0));
-
-  Value* printInt = ConstantInt::get(llvmContext, APInt(32, 42));
-  builder.CreateCall(putcharType, putcharFunction, {printInt}, "call");
 }
 
 void Visitor::generateLeft() {
-  stackOffset = builder.CreateAdd(stackOffset, ConstantInt::get(llvmContext, APInt(32, 1)), "stackOffset");
+  //stackOffset = builder.CreateAdd(stackOffset, ConstantInt::get(llvmContext, APInt(32, 1)), "stackOffset");
+  stack = builder.CreateGEP(stack, ConstantInt::get(llvmContext, APInt(32, 1)), "stackPointer");
 }
 void Visitor::generateRight() {
-  stackOffset = builder.CreateSub(stackOffset, ConstantInt::get(llvmContext, APInt(32, 1)), "stackOffset");
+  //stackOffset = builder.CreateSub(stackOffset, ConstantInt::get(llvmContext, APInt(32, 1)), "stackOffset");
+  stack = builder.CreateGEP(stack, ConstantInt::get(llvmContext, APInt(32, -1)), "stackPointer");
 }
 void Visitor::generateIncrement() {
   DILabel* label = debug.builder->createLabel(debug.stack.top(),
@@ -234,26 +209,30 @@ void Visitor::generateIncrement() {
                                               debug.compileUnit->getFile(),
                                               builder.getCurrentDebugLocation().getLine(),
                                               false);
-
-  Value* currentStackAddress = builder.CreateGEP(stack, stackOffset, "currentStackAddress");
-  Value* oldStackValue = builder.CreateLoad(currentStackAddress, "oldStackValue");
+//  stack = builder.CreateGEP(stack, ConstantInt::get(llvmContext, APInt(32, 1)), "currentStackAddress");
+//  Value* currentStackAddress =
+//  Value* oldStackValue = builder.CreateLoad(currentStackAddress, "oldStackValue");
+//  Value* stackValue = builder.CreateAdd(oldStackValue, ConstantInt::get(llvmContext, APInt(32, 1)), "stackValue");
+//  builder.CreateStore(stackValue, currentStackAddress);
+  Value* oldStackValue = builder.CreateLoad(stack, "oldStackValue");
   Value* stackValue = builder.CreateAdd(oldStackValue, ConstantInt::get(llvmContext, APInt(32, 1)), "stackValue");
-  builder.CreateStore(stackValue, currentStackAddress);
+  builder.CreateStore(stackValue, stack);
 }
 void Visitor::generateDecrement() {
-  Value* currentStackAddress = builder.CreateGEP(stack, stackOffset, "currentStackAddress");
-  Value* oldStackValue = builder.CreateLoad(currentStackAddress, "oldStackValue");
+//  stack = builder.CreateGEP(stack, ConstantInt::get(llvmContext, APInt(32, -1)), "currentStackAddress");
+//  Value* currentStackAddress = builder.CreateGEP(stack, stackOffset, "currentStackAddress");
+  Value* oldStackValue = builder.CreateLoad(stack, "oldStackValue");
   Value* stackValue = builder.CreateSub(oldStackValue, ConstantInt::get(llvmContext, APInt(32, 1)), "stackValue");
-  builder.CreateStore(stackValue, currentStackAddress);
+  builder.CreateStore(stackValue, stack);
 }
 void Visitor::generateRead() {
-  Value* currentStackAddress = builder.CreateGEP(stack, stackOffset, "currentStackAddress");
+//  Value* currentStackAddress = builder.CreateGEP(stack, stackOffset, "currentStackAddress");
   Value* stackValue = builder.CreateCall(getcharType, getcharFunction, {}, "readStackValue");
-  builder.CreateStore(stackValue, currentStackAddress);
+  builder.CreateStore(stackValue, stack);
 }
 void Visitor::generateWrite() {
-  Value* currentStackAddress = builder.CreateGEP(stack, stackOffset, "currentStackAddress");
-  Value* stackValue = builder.CreateLoad(currentStackAddress, "stackValue");
+//  Value* currentStackAddress = builder.CreateGEP(stack, stackOffset, "currentStackAddress");
+  Value* stackValue = builder.CreateLoad(stack, "stackValue");
   builder.CreateCall(putcharType, putcharFunction, {stackValue});
 }
 DIType* Visitor::DebugInfo::getIntType() {
@@ -289,9 +268,9 @@ void Visitor::DebugInfo::setLocation(int line, int column, DIScope* scope) {
 DISubprogram* Visitor::DebugInfo::createFunction(const std::string& name, int line, int column, DISubroutineType* type) {
   if(type == nullptr) {
     std::vector<Metadata*> values;
-    values.push_back(getIntType());
     values.push_back(getPointerType());
-    values.push_back(getIntType());
+    values.push_back(getPointerType());
+    //values.push_back(getIntType());
     auto types = builder->getOrCreateTypeArray(values);
     type = builder->createSubroutineType(types);
   }
