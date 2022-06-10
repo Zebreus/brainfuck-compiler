@@ -3,17 +3,16 @@
 #include "antlr4-runtime/antlr4-runtime.h"
 #include "parser/brainfuckLexer.h"
 #include "parser/brainfuckParser.h"
-#include "parser/brainfuckVisitor.h"
 #include "visitor.h"
 
 int main() {
-  // std::string inputString = "++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++.";
+   //std::string inputString = "++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++.";
   // std::string inputString = ",++.[,..--------------------------------<>]"; // Space quits
   // std::string inputString = "++++++++++" "++++++++++" "++++++++++" "++++++++++" "++.";
-  // antlr4::ANTLRInputStream input(inputString);
-  // brainfuckLexer lexer(&input);
+   //antlr4::ANTLRInputStream input(inputString);
+   //brainfuckLexer lexer(&input);
 
-  constexpr auto filename = "main.bf";
+  constexpr auto filename = "../main.bf";
 
   std::ifstream stream;
   stream.open(filename);

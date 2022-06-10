@@ -86,9 +86,20 @@ antlrcpp::Any Visitor::visitBlock(brainfuckParser::BlockContext* context) {
   BasicBlock* entryBlock = BasicBlock::Create(llvmContext, "entry", function);
   BasicBlock* mainBlock = BasicBlock::Create(llvmContext, "main", function);
   BasicBlock* exitBlock = BasicBlock::Create(llvmContext, "exit", function);
+
   DISubprogram* subprogram = debug.createFunction(functionName, line, column);
   function->setSubprogram(subprogram);
   debug.stack.push(subprogram);
+
+  DIType* stackType = debug.getPointerType();
+  // DILocalVariable* stackVar = debug.builder->createAutoVariable(SP, "stackPointer", SP->getFile(), 1, stackType, true);
+  //DILocalVariable* stackVar = debug.builder->createAutoVariable(subprogram, StringRef("stackPointer"), subprogram->getFile(), 1, stackType, false);
+  DILocalVariable* stackVar = debug.builder->createParameterVariable(subprogram, StringRef("stackPointer"),0, subprogram->getFile(), line, stackType, false);
+      //subprogram, StringRef("stackPointer"), subprogram->getFile(), 1, stackType, false);
+  DIExpression* expression = debug.builder->createExpression();
+  DILocation* location = DILocation::get(subprogram->getContext(), line, column, subprogram);
+  debug.builder->insertDeclare(function->getArg(0), stackVar, expression, location, entryBlock);
+
 
   // Create a call to the function with the current stackPointer
   Value* resultingStackPointer = builder.CreateCall(blockFunctionType, function, {stackPointer});
